@@ -1,0 +1,25 @@
+' to convert:
+'   plantuml -tsvg sequence.wsd
+'   plantuml -tpng sequence.wsd
+
+@startuml ymodem
+participant SENDER
+participant RECEIVER
+
+loop every file
+    RECEIVER -> SENDER: C
+    SENDER -> RECEIVER: block 0 (filename + dim (opt))
+    SENDER <- RECEIVER: ACK
+    SENDER <- RECEIVER: C
+    loop N blocks
+        SENDER -> RECEIVER: block n
+        SENDER <- RECEIVER: ACK
+    end
+    SENDER -> RECEIVER: EOT
+    SENDER <- RECEIVER: ACK
+end
+RECEIVER -> SENDER: C
+SENDER -> RECEIVER: block 0 (empty)
+SENDER <- RECEIVER: ACK
+
+@enduml
