@@ -3,6 +3,10 @@
 '   plantuml -tpng sequence.wsd
 
 @startuml ymodem
+
+skinparam backgroundColor #FEFEFE
+scale 1.6
+
 participant SENDER
 participant RECEIVER
 

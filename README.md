@@ -21,7 +21,7 @@ Sources were created using the following algorithms:<br>
 - **bit-by-bit-fast**: like bit-by-bit it compute CRC bit by bit, but is a little faster and not so small.
 - **table-driven**: fastest algorithm but also bigger.
 
-The implementer will be able to choose which of the 3 algorithms to use based on the environment of constraints he will have.
+The user will be able to choose which of the 3 algorithms to use based on the environment of constraints he will have.
 
 
 ## Usage
