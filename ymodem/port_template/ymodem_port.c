@@ -30,33 +30,3 @@ int ymodem_port_atoi (const char *nptr)
     return 0;
 }
 
-
-size_t ymodem_port_maxFileSize()
-{
-    return 0;
-}
-
-int32_t ymodem_port_ReceiveStart(const char * filename, ssize_t filesize)
-{
-    return 0;
-}
-
-int32_t ymodem_port_ProcessData(const uint8_t *buffer, size_t buffSz)
-{
-    return 0;
-}
-
-int32_t ymodem_port_ReceiveEnd(void)
-{
-    return 0;
-}
-
-int ymodem_port_getByte(uint32_t tout)
-{
-    return -1;
-}
-
-void ymodem_port_putByte(uint8_t c)
-{
-
-}

@@ -85,57 +85,5 @@ void *ymodem_port_memchr(const void *s, int c, size_t n) __attribute__((nonnull 
  */
 int ymodem_port_atoi(const char *nptr) __attribute__((nonnull (1)));
 
-/**
- * @brief callback to get maximum file size supported
- *
- * @retval maximum file size supported
- */
-size_t ymodem_port_maxFileSize();
-
-/**
- * @brief callback function called when start receiving bytes of a file
- *
- * it is supposed to intializa storage structures (eg. open file)
- *
- * @param filename null terminated file name string
- * @param filesize expected filesize. If negative expected filesize is unknown
- * @return 0 on success
- */
-int32_t ymodem_port_ReceiveStart(const char *filename, ssize_t filesize);
-
-/**
- * @brief callback function called every data block received
- *
- * it is supposed to store bytes into storage
- *
- * @param buffer array containing bytes to process (store)
- * @param buffSz array size
- * @return 0 on success
- */
-int32_t ymodem_port_ProcessData(const uint8_t *buffer, size_t buffSz);
-
-/**
- * @brief callback function called when end receiving bytes of a file
- *
- * it is supposed to finalize storage structures (eg. close file)
- *
- * @return 0 on success
- */
-int32_t ymodem_port_ReceiveEnd(void);
-
-/**
- * @brief function returning byte received whithin timeout
- *
- * @param tout timeout in ms
- * @return the byte received as an unsigned char cast to an int or -1 on timeout
- */
-int ymodem_port_getByte(uint32_t tout);
-
-/**
- * @brief output the byte c
- *
- * @param c byte to outout
- */
-void ymodem_port_putByte(uint8_t c);
 
 #endif /* TEST_RY_YMODEM_PORT_H */

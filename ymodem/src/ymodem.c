@@ -30,11 +30,9 @@
 #define PACKET_SIZE             (128)
 #define PACKET_1K_SIZE          (1024)
 
-#ifndef FILE_NAME_LENGTH
-#define FILE_NAME_LENGTH        (256)
-#endif
-#ifndef FILE_SIZE_LENGTH
-#define FILE_SIZE_LENGTH        (16)
+/* length of the file size field in the block 0 */
+#ifndef YM_FILE_SIZE_LENGTH
+#define YM_FILE_SIZE_LENGTH        (16)
 #endif
 
 #define SOH                     (0x01)  /* start of 128-byte data packet */
@@ -51,6 +49,13 @@
 #define CHAR_TIMEOUT_ms         (1000)
 #define MAX_RETRY               (5)
 
+#define min(a, b)                                                                                                     \
+    ({                                                                                                                 \
+        typeof(a) _a = (a);                                                                                            \
+        typeof(b) _b = (b);                                                                                            \
+        _a < _b ? _a : _b;                                                                                             \
+    })
+
 typedef enum
 {
     pktTYPE_timeout = -2,
@@ -63,19 +68,39 @@ typedef enum
 }pktTYPE_t;
 
 
-pktTYPE_t ymodem_receive_packet(uint8_t *data, size_t *pktLen, u_int8_t *seqNum)
+struct ymodem_desc
+{
+    uint8_t data[PACKET_1K_SIZE]; /* buffer for blocks */
+    char filename[YM_FILE_NAME_LENGTH]; /* buffer for filenames */
+    ssize_t filesize; /* filesize */
+    ssize_t bytesRecved; /* file bytes received */
+
+    void *cbParam; /* parameter to pass to the callbacks */
+
+    /* callbacks */
+    ymodem_maxFileSize_t maxFileSize;
+    ymodem_receiveStart_t receiveStart;
+    ymodem_processData_t processData;
+    ymodem_receiveEnd_t receiveEnd;
+    ymodem_getByte_t getByte;
+    ymodem_putByte_t putByte;
+};
+
+_Static_assert(sizeof(struct ymodem_desc) == sizeof(staticYmodem_t), "sizes of public and private structures must match");
+
+static pktTYPE_t ymodem_receive_packet(ymodem_desc_t *ymHdl, size_t *pktLen, u_int8_t *seqNum)
 {
     int c;
 
     /* wait first char */
-    c = ymodem_port_getByte(PKT_TIMEOUT_ms);
+    c = ymHdl->getByte(ymHdl->cbParam, PKT_TIMEOUT_ms);
     switch(c)
     {
     case -1: /* timeout or error */
         ymodem_log("timeout\n");
         return pktTYPE_timeout;
     case CAN:
-        c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+        c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
         if (CAN == c)
         {
             ymodem_log("Abort trom other\n");
@@ -101,14 +126,14 @@ pktTYPE_t ymodem_receive_packet(uint8_t *data, size_t *pktLen, u_int8_t *seqNum)
 
     /* get block number and its complement */
     uint8_t blk_n, blk_n_compl;
-    c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+    c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
     if(c < 0)
     {
         ymodem_log("broken 1\n");
         return pktTYPE_brokenPkt;
     }
     blk_n = c & 0xff;
-    c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+    c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
     if(c < 0)
     {
         ymodem_log("broken 2\n");
@@ -120,27 +145,27 @@ pktTYPE_t ymodem_receive_packet(uint8_t *data, size_t *pktLen, u_int8_t *seqNum)
     computedCrc = crc16_xmodem_init();
     for(int i=0;i<*pktLen;i++)
     {
-        c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+        c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
         if(c < 0)
         {
             ymodem_log("broken 3\n");
             return pktTYPE_brokenPkt;
         }
-        data[i] = (uint8_t)c;
-        computedCrc = crc16_xmodem_update(computedCrc, &data[i], 1);
+        ymHdl->data[i] = (uint8_t)c;
+        computedCrc = crc16_xmodem_update(computedCrc, &ymHdl->data[i], 1);
     }
     computedCrc = crc16_xmodem_finalize(computedCrc);
 
     /* get crc */
     uint16_t crc;
-    c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+    c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
     if(c < 0)
     {
         ymodem_log("broken 4\n");
         return pktTYPE_brokenPkt;
     }
     crc = ((uint8_t)c)<<8;
-    c = ymodem_port_getByte(CHAR_TIMEOUT_ms);
+    c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
     if(c < 0)
     {
         ymodem_log("broken 5\n");
@@ -179,8 +204,8 @@ static blk0TYPE_t ymodem_parse_block0(const uint8_t *data, size_t pktLen, char *
     {
         return blk0TYPE_Empty;
     }
-    char *dstPtr  = ymodem_port_stpncpy(filename, (const char *)data, FILE_NAME_LENGTH);
-    filename[FILE_NAME_LENGTH-1] = 0; /* null termination, just in case */
+    char *dstPtr  = ymodem_port_stpncpy(filename, (const char *)data, YM_FILE_NAME_LENGTH);
+    filename[YM_FILE_NAME_LENGTH-1] = 0; /* null termination, just in case */
     int idx = dstPtr -filename;
     uint8_t *fileSzPtr = ymodem_port_memchr(&data[idx], 0, pktLen-idx); /* at the moment fileSzPtr actually point to null termination char of the filename */
     if(NULL == fileSzPtr) /* it seems that filename is endless */
@@ -209,38 +234,36 @@ typedef enum
     fileRecv_Abort,
 }fileRecv_t;
 
-fileRecv_t ymodem_receive_file()
+static fileRecv_t ymodem_receive_file(ymodem_desc_t *ymHdl)
 {
     pktTYPE_t pktType;
-    static uint8_t data[PACKET_1K_SIZE];
     uint8_t blkNum;
     size_t pktLen;
     int retryCount = 0;
-    static char filename[FILE_NAME_LENGTH];
-    ssize_t filesize;
     size_t maxFileSize;
 
     /* request to start transmission */
-    ymodem_port_putByte(CRC16);
+    ymHdl->putByte(ymHdl->cbParam, CRC16);
+
     retryCount = 0;
     do
     {
         /* wait packet */
-        pktType = ymodem_receive_packet(data, &pktLen, &blkNum);
+        pktType = ymodem_receive_packet(ymHdl, &pktLen, &blkNum);
         /* check packet */
         switch (pktType)
         {
         case pktTYPE_timeout: /* when timeout we have to resend 'C' */
-            ymodem_port_putByte(CRC16);
+            ymHdl->putByte(ymHdl->cbParam, CRC16);
             continue;
         case pktTYPE_brokenPkt:
         case pktTYPE_EOT:
         case pktTYPE_ACK:
         case pktTYPE_NAK: /* for unexpected char or broken packet we send NAK */
-            ymodem_port_putByte(NAK);
+            ymHdl->putByte(ymHdl->cbParam, NAK);
             continue;
         case pktTYPE_CAN: /* If sender ask to stop transer we ACK and exit */
-            ymodem_port_putByte(ACK);
+            ymHdl->putByte(ymHdl->cbParam, ACK);
             return fileRecv_Abort;
         case pktTYPE_data:
             break;
@@ -248,64 +271,65 @@ fileRecv_t ymodem_receive_file()
 
         if(0 != blkNum) /* at this point we are waiting only packet 0 */
         {
-            ymodem_port_putByte(NAK);
+            ymHdl->putByte(ymHdl->cbParam, NAK);
             continue;
         }
         break; /* when we are here we are sure that packet is valideted */
     }while(++retryCount < MAX_RETRY);
     if(retryCount >= MAX_RETRY) /* we hav retryed enough, we give up asking sender to abort transfer */
     {
-        ymodem_port_putByte(CAN);
-        ymodem_port_putByte(CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
         return fileRecv_Error;
     }
     blk0TYPE_t blk0Type;
 
     /* parse block 0 */
-    blk0Type = ymodem_parse_block0(data, pktLen, filename, &filesize);
+    blk0Type = ymodem_parse_block0(ymHdl->data, pktLen, ymHdl->filename, &ymHdl->filesize);
+    ymHdl->bytesRecved = 0;
 
     switch(blk0Type)
     {
     case blk0TYPE_Error: /* we give up */
-        ymodem_port_putByte(CAN);
-        ymodem_port_putByte(CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
         return fileRecv_Error;
     case blk0TYPE_OK:
-        ymodem_port_putByte(ACK);
+        ymHdl->putByte(ymHdl->cbParam, ACK);
         break;
     case blk0TYPE_Empty: /* empty block means end of transfer */
-        ymodem_port_putByte(ACK);
+        ymHdl->putByte(ymHdl->cbParam, ACK);
         return fileRecv_EOT;
     }
 
-    maxFileSize = ymodem_port_maxFileSize();
+    maxFileSize = ymHdl->maxFileSize(ymHdl->cbParam);
 
-    if (filesize > maxFileSize) /* if the file if too long we give up */
+    if (ymHdl->filesize > maxFileSize) /* if the file if too long we give up */
     {
-        ymodem_port_putByte(CAN);
-        ymodem_port_putByte(CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
         return fileRecv_Error;
     }
     int32_t resStart;
-    resStart = ymodem_port_ReceiveStart(filename, filesize);
+    resStart = ymHdl->receiveStart(ymHdl->cbParam, ymHdl->filename);
     if (0 != resStart) /* error initialing transfer */
     {
-        ymodem_port_putByte(CAN);
-        ymodem_port_putByte(CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
+        ymHdl->putByte(ymHdl->cbParam, CAN);
         return fileRecv_Error;
     }
     fileRecv_t ret = fileRecv_Error;
 
     uint8_t expectedPacket = 1;
     /* request to continue transmission */
-    ymodem_port_putByte(CRC16);
+    ymHdl->putByte(ymHdl->cbParam, CRC16);
     while(1)
     {
         retryCount = 0;
         do
         {
             /* wait packet */
-            pktType = ymodem_receive_packet(data, &pktLen, &blkNum);
+            pktType = ymodem_receive_packet(ymHdl, &pktLen, &blkNum);
             /* check packet */
             switch (pktType)
             {
@@ -314,14 +338,14 @@ fileRecv_t ymodem_receive_file()
             case pktTYPE_ACK:
             case pktTYPE_NAK: /* for timeout or unexpected char or broken packet we send NAK */
                 ymodem_log("send NAK due to pkType %d\n", pktType);
-                ymodem_port_putByte(NAK);
+                ymHdl->putByte(ymHdl->cbParam, NAK);
                 continue;
             case pktTYPE_EOT:
-                ymodem_port_putByte(ACK);
+                ymHdl->putByte(ymHdl->cbParam, ACK);
                 ret = fileRecv_OK;
                 goto ymodem_receive_file_end;
             case pktTYPE_CAN: /* If sender ask to stop transer we ACK and exit */
-                ymodem_port_putByte(ACK);
+                ymHdl->putByte(ymHdl->cbParam, ACK);
                 ret = fileRecv_Abort;
                  goto ymodem_receive_file_end;
            case pktTYPE_data:
@@ -331,7 +355,7 @@ fileRecv_t ymodem_receive_file()
             if(expectedPacket != blkNum) /* an out-of-sequence packet */
             {
                 ymodem_log("out of sequence [exp %hhu, recv %hhu]\n", expectedPacket, blkNum);
-                ymodem_port_putByte(NAK);
+                ymHdl->putByte(ymHdl->cbParam, NAK);
                 continue;
             }
             break; /* when we are here we are sure that packet is valideted */
@@ -339,35 +363,66 @@ fileRecv_t ymodem_receive_file()
 
         if(retryCount >= MAX_RETRY)
         {
-            ymodem_port_putByte(CAN);
-            ymodem_port_putByte(CAN);
+            ymHdl->putByte(ymHdl->cbParam, CAN);
+            ymHdl->putByte(ymHdl->cbParam, CAN);
             ret = fileRecv_Error;
             goto ymodem_receive_file_end;
+        }
+
+        size_t actualDataSz;
+        if(ymHdl->filesize < 0)
+        {
+            actualDataSz = pktLen;
+        }
+        else
+        {
+            actualDataSz = min(ymHdl->filesize - ymHdl->bytesRecved, pktLen);
         }
 
         int32_t resProcess;
-        resProcess = ymodem_port_ProcessData(data, pktLen);
+        resProcess = ymHdl->processData(ymHdl->cbParam, ymHdl->data, actualDataSz);
+        ymHdl->bytesRecved += actualDataSz;
         if (0 != resProcess) /* error initialing transfer */
         {
-            ymodem_port_putByte(CAN);
-            ymodem_port_putByte(CAN);
+            ymHdl->putByte(ymHdl->cbParam, CAN);
+            ymHdl->putByte(ymHdl->cbParam, CAN);
             ret = fileRecv_Error;
             goto ymodem_receive_file_end;
         }
-        ymodem_port_putByte(ACK);
+        ymHdl->putByte(ymHdl->cbParam, ACK);
         expectedPacket++;
     }
 ymodem_receive_file_end:
-    ymodem_port_ReceiveEnd();
+    ymHdl->receiveEnd(ymHdl->cbParam);
     return ret;
 }
 
-int ymodem_receive()
+ymodem_desc_t *ymodem_init(staticYmodem_t *staticYmBuffer, void *cbParam, ymodem_maxFileSize_t maxFileSize, 
+                            ymodem_receiveStart_t receiveStart, ymodem_processData_t processData,
+                            ymodem_receiveEnd_t receiveEnd, ymodem_getByte_t getByte, ymodem_putByte_t putByte)
+{
+    if(NULL == staticYmBuffer)
+    {
+        return NULL;
+    }
+
+    ymodem_desc_t *ymHdl = (ymodem_desc_t *)staticYmBuffer;
+    ymHdl->cbParam = cbParam;
+    ymHdl->maxFileSize = maxFileSize;
+    ymHdl->receiveStart = receiveStart;
+    ymHdl->processData = processData;
+    ymHdl->receiveEnd = receiveEnd;
+    ymHdl->getByte = getByte;
+    ymHdl->putByte = putByte;
+    return ymHdl;
+}
+
+int ymodem_receive(ymodem_desc_t *ymHdl)
 {
     fileRecv_t fileRes;
     do
     {
-        fileRes = ymodem_receive_file();
+        fileRes = ymodem_receive_file(ymHdl);
     }while(fileRecv_OK == fileRes);
 
     return fileRecv_EOT == fileRes ? 0: 1;

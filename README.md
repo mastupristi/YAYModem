@@ -26,7 +26,8 @@ The user will be able to choose which of the 3 algorithms to use based on the en
 
 ## Usage
 
-The only thing you have to do to integrate YAYModem into your project is to customize the `ymodem_port.*` files.
+The only thing you have to do to integrate YAYModem into your project is to customize the `ymodem_port.*` files.<br>
+You also have to provide some other function as callbacks.
 
 Find examples in the `test` directory.
 
