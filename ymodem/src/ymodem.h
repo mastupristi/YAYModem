@@ -88,16 +88,16 @@ typedef struct ymodem_desc ymodem_desc_t;
 
 /* sed struct dimension depending on platform */
 #if UINTPTR_MAX == 0xFFFFFFFF
-#define STATICBUFF_SZ 1060 + ROUND_UP_MULTIPLE_OF_4(YM_FILE_NAME_LENGTH) /* for 32-bit platforms */
+#define STATIC_YAYM_BUFF_SZ 1060 + ROUND_UP_MULTIPLE_OF_4(YM_FILE_NAME_LENGTH) /* for 32-bit platforms */
 #elif UINTPTR_MAX == 0xFFFFFFFFFFFFFFFF
-#define STATICBUFF_SZ 1096 + ROUND_UP_MULTIPLE_OF_8(YM_FILE_NAME_LENGTH) /* for 64-bit platforms */
+#define STATIC_YAYM_BUFF_SZ 1096 + ROUND_UP_MULTIPLE_OF_8(YM_FILE_NAME_LENGTH) /* for 64-bit platforms */
 #else
 #error "Unknown platform"
 #endif
 
 typedef struct staticYmodem
 {
-    uint8_t dummy[STATICBUFF_SZ];
+    uint8_t dummy[STATIC_YAYM_BUFF_SZ];
 }staticYmodem_t;
 
 /**
