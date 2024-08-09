@@ -95,7 +95,9 @@ typedef struct ymodem_desc ymodem_desc_t;
 #error "Unknown platform"
 #endif
 
-typedef struct staticYmodem
+#define ALIGNMENT (__SIZEOF_POINTER__)
+
+typedef struct __attribute__((aligned(ALIGNMENT))) staticYmodem
 {
     uint8_t dummy[STATIC_YAYM_BUFF_SZ];
 }staticYmodem_t;
