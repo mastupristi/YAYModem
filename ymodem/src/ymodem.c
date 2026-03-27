@@ -143,7 +143,7 @@ static pktTYPE_t ymodem_receive_packet(ymodem_desc_t *ymHdl, size_t *pktLen, u_i
     /* get data bytes and compute crc */
     crc16_xmodem_t computedCrc;
     computedCrc = crc16_xmodem_init();
-    for(int i=0;i<*pktLen;i++)
+    for(uint32_t i=0;i<*pktLen;i++)
     {
         c = ymHdl->getByte(ymHdl->cbParam, CHAR_TIMEOUT_ms);
         if(c < 0)
@@ -304,7 +304,7 @@ static fileRecv_t ymodem_receive_file(ymodem_desc_t *ymHdl)
 
     maxFileSize = ymHdl->maxFileSize(ymHdl->cbParam);
 
-    if (ymHdl->filesize > maxFileSize) /* if the file if too long we give up */
+    if ((int64_t)ymHdl->filesize > (int64_t)maxFileSize) /* if the file if too long we give up */
     {
         ymHdl->putByte(ymHdl->cbParam, CAN);
         ymHdl->putByte(ymHdl->cbParam, CAN);
@@ -376,7 +376,7 @@ static fileRecv_t ymodem_receive_file(ymodem_desc_t *ymHdl)
         }
         else
         {
-            actualDataSz = min(ymHdl->filesize - ymHdl->bytesRecved, pktLen);
+            actualDataSz = min((size_t)(ymHdl->filesize - ymHdl->bytesRecved), pktLen);
         }
 
         int32_t resProcess;
